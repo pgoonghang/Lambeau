@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Distance to Lambeau Field</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { font-family: sans-serif; margin: 0; background: #1f3d1f; color: #fff; }
+    .container { max-width: 800px; margin: auto; padding: 20px; }
+    .card { background: #2e5f2e; padding: 20px; border-radius: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); border: 3px solid #ffcc00; }
+    h2, h3 { color: #ffcc00; }
+    #map { height: 350px; border-radius: 12px; margin-top: 15px; border: 2px solid #ffcc00; }
+    input, select, button { padding: 10px; border-radius: 8px; border: 1px solid #ccc; }
+    button { background:#ffcc00; color:#000; font-weight:bold; cursor:pointer; }
+    select { background:#fff; color:#000; }
+    input { background:#fff; color:#000; }
+    .row { display: flex; gap: 10px; margin-bottom: 10px; }
+    .row input { flex: 1; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h2>Distance to Lambeau Field</h2>
+      <p>As-the-crow-flies distance to Lambeau Field (Green Bay, WI).</p>
+
+      <div class="row">
+        
+        <button onclick="clearLocation()">Clear</button>
+        <select id="unitSelect" onchange="updateDisplay()">
+          <option value="mi">Miles</option>
+          <option value="km">Kilometers</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <input id="latInput" placeholder="Latitude (e.g. 37.7749)">
+        <input id="lonInput" placeholder="Longitude (e.g. -122.4194)">
+        <button onclick="useManual()">Use</button>
+      </div>
+
+      <p id="statusText" style="color:#666; font-size: 0.9em;">No location selected.</p>
+
+      <h3 id="distanceText"></h3>
+      <div id="detailsText" style="font-size: 0.9em; color:#555"></div>
+
+      <div id="map"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const LAMBEAU = { lat: 44.5013, lon: -88.0622 };
+    let userPos = null;
+
+    const map = L.map('map').setView([LAMBEAU.lat, LAMBEAU.lon], 5);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+    }).addTo(map);
+
+    const lambeauMarker = L.marker([LAMBEAU.lat, LAMBEAU.lon]).addTo(map)
+      .bindPopup('Lambeau Field');
+    let userMarker = null;
+    let line = null;
+
+    function toRad(deg) { return deg * Math.PI / 180; }
+
+    function haversineKm(a, b) {
+      const R = 6371;
+      const dLat = toRad(b.lat - a.lat);
+      const dLon = toRad(b.lon - a.lon);
+      const lat1 = toRad(a.lat);
+      const lat2 = toRad(b.lat);
+
+      const x = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+    }
+
+    function bearingDeg(a, b) {
+      const lat1 = toRad(a.lat), lat2 = toRad(b.lat);
+      const dLon = toRad(b.lon - a.lon);
+      const y = Math.sin(dLon) * Math.cos(lat2);
+      const x = Math.cos(lat1)*Math.sin(lat2) - Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon);
+      return (Math.atan2(y, x) * 180/Math.PI + 360) % 360;
+    }
+
+    function formatDistance(km, unit) {
+      if (unit === 'mi') {
+        const mi = km * 0.621371;
+        return mi < 1 ? mi.toFixed(2) + ' mi' : mi.toFixed(1) + ' mi';
+      }
+      return km < 1 ? Math.round(km*1000) + ' m' : km.toFixed(2) + ' km';
+    }
+
+    function updateMap() {
+      if (!userPos) return;
+
+      if (userMarker) map.removeLayer(userMarker);
+      if (line) map.removeLayer(line);
+
+      userMarker = L.marker([userPos.lat, userPos.lon]).addTo(map).bindPopup('You');
+      line = L.polyline([[userPos.lat, userPos.lon], [LAMBEAU.lat, LAMBEAU.lon]], { color: 'blue' }).addTo(map);
+
+      map.fitBounds(line.getBounds(), { padding: [20, 20] });
+    }
+
+    function updateDisplay() {
+      if (!userPos) return;
+
+      const unit = document.getElementById('unitSelect').value;
+      const km = haversineKm(userPos, LAMBEAU);
+      const br = bearingDeg(userPos, LAMBEAU);
+
+      document.getElementById('distanceText').textContent = formatDistance(km, unit);
+      document.getElementById('detailsText').textContent = `(${km.toFixed(2)} km) • Bearing ${Math.round(br)}°`;
+
+      updateMap();
+    }
+
+    function locateUserAuto() {
+      document.getElementById('statusText').textContent = 'Locating… (allow location access)';
+
+      navigator.geolocation.getCurrentPosition(pos => {
+        userPos = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        document.getElementById('statusText').textContent = `Your location: ${userPos.lat.toFixed(4)}, ${userPos.lon.toFixed(4)}`;
+        updateDisplay();
+      }, err => {
+        document.getElementById('statusText').textContent = 'Error: ' + err.message;
+      }, { enableHighAccuracy: true, timeout: 10000 });
+    }
+
+    window.onload = () => {
+      locateUserAuto();
+    }
+    function useManual() {
+      const lat = parseFloat(document.getElementById('latInput').value);
+      const lon = parseFloat(document.getElementById('lonInput').value);
+      if (isFinite(lat) && isFinite(lon)) {
+        userPos = { lat, lon };
+        document.getElementById('statusText').textContent = `Using manual coordinates.`;
+        updateDisplay();
+      } else {
+        document.getElementById('statusText').textContent = 'Invalid coordinates.';
+      }
+    }
+
+    function clearLocation() {
+      userPos = null;
+      document.getElementById('statusText').textContent = 'No location selected.';
+      document.getElementById('distanceText').textContent = '';
+      document.getElementById('detailsText').textContent = '';
+      if (userMarker) map.removeLayer(userMarker);
+      if (line) map.removeLayer(line);
+      map.setView([LAMBEAU.lat, LAMBEAU.lon], 5);
+    }
+  </script>
+</body>
+</html>
